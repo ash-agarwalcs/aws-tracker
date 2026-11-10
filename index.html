@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; connect-src https://api.github.com; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="robots" content="noindex">
+<title>AWS learning tracker</title>
+<!--
+  This page holds no plan and no progress. After you connect it, it reads
+  plan-data.js and progress.json from your private GitHub repository through
+  the GitHub API, and writes progress.json back as you tick.
+-->
+<style>
+  :root {
+    --bg: #f3f5f8;
+    --card: #ffffff;
+    --ink: #1b2430;
+    --muted: #5a6575;
+    --line: #dde2ea;
+    --ring: #a3adbb;
+    --accent: #0a5c8a;
+    --accent-soft: #e5f0f7;
+    --good: #18794a;
+    --good-soft: #e3f4ea;
+    --warn: #8a5200;
+    --warn-soft: #fdf0d9;
+    --bad: #b0332b;
+    --bad-soft: #fbe8e6;
+    --code-bg: #eef1f5;
+    --top-h: 56px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11151b;
+      --card: #1a2029;
+      --ink: #e7eaef;
+      --muted: #9ba6b5;
+      --line: #2b3340;
+      --ring: #5b6676;
+      --accent: #6fb8e2;
+      --accent-soft: #1b3142;
+      --good: #5fcf96;
+      --good-soft: #17352a;
+      --warn: #e8b05a;
+      --warn-soft: #3a2c14;
+      --bad: #f08a80;
+      --bad-soft: #3d1f1c;
+      --code-bg: #252d39;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  }
+  a { color: var(--accent); }
+  code {
+    font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+  .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  .btn {
+    display: inline-block; border: 1px solid var(--line); background: var(--card);
+    padding: 7px 14px; border-radius: 6px; cursor: pointer; text-decoration: none; color: var(--ink);
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { .btn.primary { color: #0c1218; } }
+  .btn.small { padding: 3px 9px; font-size: 13px; }
+  .btn:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  /* Top bar */
+  header.top {
+    position: sticky; top: 0; z-index: 20; height: var(--top-h);
+    display: flex; align-items: center; gap: 18px; padding: 0 20px;
+    background: var(--card); border-bottom: 1px solid var(--line);
+  }
+  .brand { font-size: 17px; font-weight: 700; color: var(--ink); text-decoration: none; white-space: nowrap; }
+  .top-progress { flex: 1 1 200px; max-width: 360px; min-width: 0; font-size: 13px; color: var(--muted); }
+  #sync-status { margin-left: auto; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  #sync-status[data-state="saved"] { color: var(--good); }
+  #sync-status[data-state="offline"] { color: var(--warn); }
+  #sync-status[data-state="error"] { color: var(--bad); font-weight: 600; }
+  #nav-toggle { display: none; }
+  .bar { display: block; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .bar > i { display: block; height: 100%; background: var(--good); width: 0; transition: width 0.2s ease-out; }
+
+  #banner { padding: 10px 20px; font-size: 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; background: var(--warn-soft); color: var(--warn); border-bottom: 1px solid var(--line); }
+  #banner.bad { background: var(--bad-soft); color: var(--bad); }
+
+  /* Shell */
+  .shell { display: grid; grid-template-columns: 320px minmax(0, 1fr); align-items: start; }
+  #nav {
+    position: sticky; top: var(--top-h); height: calc(100vh - var(--top-h)); overflow-y: auto;
+    background: var(--card); border-right: 1px solid var(--line); padding: 10px 0 40px;
+  }
+  #main { padding: 28px 36px 80px; max-width: 920px; width: 100%; }
+  @media (max-width: 900px) {
+    header.top { height: auto; flex-wrap: wrap; gap: 6px 12px; padding: 8px 16px; }
+    .top-progress { order: 3; flex-basis: 100%; max-width: none; }
+    #nav-toggle { display: inline-block; }
+    .shell { grid-template-columns: minmax(0, 1fr); }
+    #nav { display: none; position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+    #nav.open { display: block; }
+    #main { padding: 20px 16px 60px; }
+  }
+
+  /* Contents list */
+  .nav-item {
+    display: flex; gap: 10px; align-items: flex-start; padding: 8px 16px 8px 15px;
+    text-decoration: none; color: var(--ink); border-left: 3px solid transparent;
+  }
+  .nav-item:hover { background: var(--bg); }
+  .nav-item.active { background: var(--accent-soft); border-left-color: var(--accent); }
+  .nav-item .t { flex: 1; min-width: 0; }
+  .nav-item .t b { display: block; font-size: 14px; font-weight: 600; }
+  .nav-item .t span { display: block; font-size: 13px; color: var(--muted); }
+  .nav-item .n { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .nav-item.plain { padding-left: 43px; font-size: 14px; }
+  .nav-group > summary {
+    display: flex; gap: 8px; align-items: baseline; padding: 12px 16px 6px; cursor: pointer; list-style: none;
+    font-weight: 700; font-size: 14px;
+  }
+  .nav-group > summary::-webkit-details-marker { display: none; }
+  .nav-group > summary::before { content: '+'; width: 12px; color: var(--muted); font-weight: 400; }
+  .nav-group[open] > summary::before { content: '\2212'; }
+  .nav-group > summary .g { flex: 1; min-width: 0; }
+  .nav-group > summary .n { font-size: 12px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .nav-head { padding: 16px 16px 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border-top: 1px solid var(--line); margin-top: 10px; }
+  .dot { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--ring); margin-top: 2px; position: relative; }
+  .dot.done { background: var(--good); border-color: var(--good); }
+  .dot.done::after {
+    content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
+    border: solid var(--card); border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+  .dot.current { border-color: var(--accent); }
+  .dot.current::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--accent); }
+  .dot.behind { border-color: var(--bad); }
+  .dot.behind::after { content: ''; position: absolute; left: 6px; top: 3px; width: 2px; height: 8px; background: var(--bad); border-radius: 1px; }
+
+  /* Page */
+  .crumb { margin: 0 0 4px; font-size: 13px; color: var(--muted); }
+  .crumb a { color: var(--muted); }
+  h1 { font-size: 26px; line-height: 1.25; margin: 0 0 6px; }
+  .meta { margin: 0 0 4px; color: var(--muted); font-size: 14px; display: flex; gap: 4px 14px; flex-wrap: wrap; align-items: center; }
+  .lead { margin: 0 0 18px; color: var(--muted); }
+  .lead .behind { color: var(--bad); }
+  .chip { font-size: 12px; padding: 1px 9px; border-radius: 10px; white-space: nowrap; }
+  .chip:empty { display: none; }
+  .chip.done { background: var(--good-soft); color: var(--good); }
+  .chip.current { background: var(--accent-soft); color: var(--accent); }
+  .chip.behind { background: var(--bad-soft); color: var(--bad); }
+  .week-note { font-size: 14px; color: var(--warn); background: var(--warn-soft); padding: 8px 12px; border-radius: 8px; margin: 14px 0 0; }
+
+  ul.items { list-style: none; margin: 18px 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  ul.items li { display: flex; gap: 12px; padding: 12px 14px; align-items: flex-start; border-bottom: 1px solid var(--line); }
+  ul.items li:last-child { border-bottom: 0; }
+  ul.items input[type="checkbox"] { width: 20px; height: 20px; margin: 1px 0 0; flex: none; accent-color: var(--good); cursor: pointer; }
+  ul.items label { flex: 1; min-width: 0; cursor: pointer; }
+  ul.items li.is-done label { color: var(--muted); }
+  .opt { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; margin-left: 6px; white-space: nowrap; }
+  .tlink { font-size: 13px; white-space: nowrap; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin: 0 0 8px; }
+  .card p { margin: 6px 0; }
+  .card ul, .card ol { margin: 6px 0; padding-left: 20px; }
+  .card li { margin: 4px 0; }
+  .log { display: grid; grid-template-columns: 170px 1fr; gap: 14px; align-items: start; }
+  .log label, .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 2px; }
+  .log input[type="number"] { width: 90px; }
+  input[type="number"], input[type="text"], input[type="password"], input[type="date"], select, textarea {
+    padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card);
+  }
+  textarea { width: 100%; min-height: 76px; resize: vertical; display: block; }
+  @media (max-width: 560px) { .log { grid-template-columns: 1fr; } }
+  details.material { margin: 0 0 16px; font-size: 14px; }
+  details.material summary { cursor: pointer; color: var(--muted); }
+  details.material ul { margin: 6px 0 0; padding-left: 20px; }
+
+  .complete { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; background: var(--good-soft); color: var(--good); padding: 12px 16px; border-radius: 10px; margin-bottom: 16px; font-weight: 600; }
+  .complete .btn { margin-left: auto; }
+  .pager { display: flex; justify-content: space-between; gap: 12px; margin-top: 24px; }
+  .pager a { max-width: 48%; }
+  .pager .next { margin-left: auto; text-align: right; }
+
+  /* Home */
+  .resume { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; border-color: var(--accent); }
+  .resume .what { flex: 1 1 260px; min-width: 0; }
+  .resume .label, .tile .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .resume .big { font-size: 19px; font-weight: 650; }
+  .resume .sub { font-size: 14px; color: var(--muted); }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 0 0 16px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .tile .big { font-size: 19px; font-weight: 650; margin: 2px 0; }
+  .tile .sub { font-size: 13px; color: var(--muted); }
+  @media (max-width: 1180px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 460px) { .tiles { grid-template-columns: 1fr; } }
+  .stage-card h2 { font-size: 17px; }
+  .stage-card h2 a { color: var(--ink); text-decoration: none; }
+  .stage-card h2 a:hover { text-decoration: underline; }
+  .stage-card .row { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .stage-card .row .n { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  /* Exam gate */
+  .ready { font-size: 14px; padding: 8px 12px; border-radius: 8px; margin: 14px 0; background: var(--warn-soft); color: var(--warn); }
+  .ready.yes { background: var(--good-soft); color: var(--good); }
+  .row-form { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-top: 10px; }
+  .row-form label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 2px; }
+  .row-form input, .row-form select { display: block; }
+  .row-form input[type="checkbox"] { display: inline-block; width: auto; }
+  .row-form input[type="number"] { width: 90px; }
+  .row-form input[type="text"] { width: 220px; max-width: 100%; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 6px 0 10px; }
+  th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .table-scroll { overflow-x: auto; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .why { display: block; color: var(--muted); font-size: 13px; }
+
+  /* Connect screen */
+  #signin, #loading { max-width: 560px; margin: 48px auto; padding: 0 20px; }
+  #signin h1 { font-size: 24px; }
+  #signin ol { padding-left: 20px; }
+  #signin li { margin: 6px 0; }
+  .field { margin: 12px 0; }
+  .field input { width: 100%; }
+  .error { background: var(--bad-soft); color: var(--bad); padding: 10px 12px; border-radius: 8px; margin: 12px 0; }
+</style>
+</head>
+<body>
+
+<noscript><p class="error" style="max-width:560px;margin:48px auto">This page needs JavaScript.</p></noscript>
+
+<div id="loading" hidden><p class="muted" id="loading-text">Loading your plan...</p></div>
+
+<div id="signin" hidden>
+  <h1>AWS learning tracker</h1>
+  <p class="muted">Your plan and progress live in a private GitHub repository. Connect this browser once, and every tick is saved there.</p>
+  <div class="card">
+    <h2>Connect</h2>
+    <ol>
+      <li><a id="si-link" target="_blank" rel="noopener" href="https://github.com/settings/personal-access-tokens/new">Create a token on GitHub</a>. The name, expiry and permission are filled in for you.</li>
+      <li>Under <strong>Repository access</strong> choose <strong>Only select repositories</strong> and pick the repository named below.</li>
+      <li>Check that <strong>Permissions</strong> shows <strong>Contents: Read and write</strong>, then press <strong>Generate token</strong> and copy it.</li>
+      <li>Paste it here.</li>
+    </ol>
+    <form id="signin-form" autocomplete="off">
+      <div class="field">
+        <label for="si-repo">Repository (owner/name)</label>
+        <input type="text" id="si-repo" spellcheck="false" autocapitalize="off" required>
+      </div>
+      <div class="field">
+        <label for="si-token">Token</label>
+        <input type="password" id="si-token" spellcheck="false" autocomplete="off" required>
+      </div>
+      <div class="error" id="si-error" role="alert" hidden></div>
+      <button class="btn primary" type="submit" id="si-submit">Connect</button>
+    </form>
+  </div>
+  <p class="small muted">The token is kept in this browser and sent only to api.github.com. Sign out removes it. A token made this way can reach that one repository and nothing else.</p>
+</div>
+
+<div id="app" hidden>
+  <header class="top">
+    <button class="btn small" id="nav-toggle" type="button" aria-expanded="false" aria-controls="nav">Contents</button>
+    <a class="brand" href="#/">AWS learning tracker</a>
+    <div class="top-progress">
+      <span id="top-progress-text"></span>
+      <span class="bar"><i id="top-progress-bar"></i></span>
+    </div>
+    <div id="sync-status" role="status"></div>
+  </header>
+  <div id="banner" hidden></div>
+  <div class="shell">
+    <nav id="nav" aria-label="Contents"></nav>
+    <main id="main"></main>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var DEFAULT_REPO = 'ash-agarwalcs/aws-learning-tracker';
+  var API = 'https://api.github.com';
+  var AUTH_KEY = 'tracker:auth';
+  var CACHE_KEY = 'tracker:cache';
+  var params = new URLSearchParams(location.search);
+  // ?branch=name reads and writes another branch of the data repository (for testing).
+  var BRANCH = /^[\w.\-\/]{1,100}$/.test(params.get('branch') || '') ? params.get('branch') : '';
+
+  // ------------------------------------------------------------ helpers
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    if (attrs) {
+      Object.keys(attrs).forEach(function (k) {
+        var v = attrs[k];
+        if (v === null || v === undefined || v === false) return;
+        if (k === 'class') el.className = v;
+        else if (k === 'text') el.textContent = v;
+        else if (k.slice(0, 2) === 'on') el.addEventListener(k.slice(2), v);
+        else if (k === 'checked' || k === 'value' || k === 'open' || k === 'hidden') el[k] = v;
+        else el.setAttribute(k, v === true ? '' : String(v));
+      });
+    }
+    for (var i = 2; i < arguments.length; i++) append(el, arguments[i]);
+    return el;
+  }
+  function append(el, child) {
+    if (child === null || child === undefined || child === false) return;
+    if (Array.isArray(child)) { child.forEach(function (c) { append(el, c); }); return; }
+    el.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+  }
+  // Plain text with `code` spans.
+  function rich(text) {
+    return String(text).split('`').map(function (part, i) {
+      return i % 2 ? h('code', { text: part }) : document.createTextNode(part);
+    });
+  }
+  function link(label, url) { return h('a', { href: url, target: '_blank', rel: 'noopener', text: label }); }
+  function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+  function $(id) { return document.getElementById(id); }
+
+  function pad(n) { return n < 10 ? '0' + n : String(n); }
+  function today() {
+    // ?today=YYYY-MM-DD overrides the date, for testing the page.
+    var m = /^\d{4}-\d{2}-\d{2}$/.exec(params.get('today') || '');
+    if (m) return m[0];
+    var d = new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function fmtDate(iso, withYear) {
+    var p = iso.split('-');
+    return Number(p[2]) + ' ' + MONTHS[Number(p[1]) - 1] + (withYear ? ' ' + p[0] : '');
+  }
+  function fmtRange(a, b) {
+    var sameMonth = a.slice(0, 7) === b.slice(0, 7);
+    var sameYear = a.slice(0, 4) === b.slice(0, 4);
+    var left = sameMonth ? String(Number(a.slice(8))) : fmtDate(a, !sameYear);
+    return left + ' to ' + fmtDate(b, true);
+  }
+  function daysBetween(a, b) {
+    return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+  }
+  function num(n) { return String(Math.round(n * 10) / 10); }
+  function isDate(s) { return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s + 'T00:00:00Z')); }
+
+  function readStore(key) {
+    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
+  }
+  function writeStore(key, value) {
+    try {
+      if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // ------------------------------------------------------------- GitHub
+  function ApiError(status, message) { this.status = status; this.message = message; }
+  function toB64(text) {
+    var bytes = new TextEncoder().encode(text), s = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  function fromB64(b64) {
+    var bin = atob(String(b64).replace(/\s/g, '')), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+  function gh(auth, path, opts) {
+    opts = opts || {};
+    var url = API + '/repos/' + auth.repo + '/contents/' + path;
+    if (BRANCH && !opts.body) url += '?ref=' + encodeURIComponent(BRANCH);
+    var headers = { 'Accept': 'application/vnd.github+json', 'Authorization': 'Bearer ' + auth.token, 'X-GitHub-Api-Version': '2022-11-28' };
+    if (opts.body) headers['Content-Type'] = 'application/json';
+    return fetch(url, {
+      method: opts.body ? 'PUT' : 'GET',
+      cache: 'no-store',
+      keepalive: !!opts.keepalive,
+      headers: headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        if (!res.ok) throw new ApiError(res.status, body && body.message ? String(body.message) : res.statusText);
+        return body;
+      });
+    }, function () { throw new ApiError(0, 'network'); });
+  }
+  function getFile(auth, path) {
+    return gh(auth, path).then(function (b) {
+      if (typeof b.content !== 'string' || b.encoding !== 'base64') throw new Error(path + ' in the repository is not a readable file.');
+      return { text: fromB64(b.content), sha: b.sha };
+    });
+  }
+  // Resolves to the file, or null when it does not exist yet.
+  function getFileOrNull(auth, path) {
+    return getFile(auth, path).then(null, function (err) { if (err && err.status === 404) return null; throw err; });
+  }
+  function putFile(auth, path, text, sha, message, keepalive) {
+    var body = { message: message, content: toB64(text) };
+    if (sha) body.sha = sha;
+    if (BRANCH) body.branch = BRANCH;
+    return gh(auth, path, { body: body, keepalive: keepalive }).then(function (b) { return b.content.sha; });
+  }
+  function explain(err, repo, writing) {
+    if (!err || !(err instanceof ApiError)) return err && err.message ? err.message : 'Something went wrong.';
+    if (err.status === 0) return 'Could not reach GitHub. Check your connection and try again.';
+    if (err.status === 401) return 'GitHub did not accept the token. It may be mistyped, expired or revoked.';
+    if (err.status === 404) {
+      return writing
+        ? 'GitHub would not save to ' + repo + '. The token needs Contents: Read and write on that repository.'
+        : 'This token cannot see plan-data.js in ' + repo + '. Check the repository name, and that the token was given access to that repository.';
+    }
+    if (err.status === 403) {
+      return writing
+        ? 'GitHub refused the save: the token needs Contents: Read and write on ' + repo + '. (' + err.message + ')'
+        : 'GitHub refused the request: ' + err.message;
+    }
+    return 'GitHub returned an error (' + err.status + '): ' + err.message;
+  }
+
+  // Runs plan-data.js (fetched from the private repository) and returns the plan it defines.
+  function loadPlan(text) {
+    return new Promise(function (resolve, reject) {
+      window.PLAN = undefined;
+      var url = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
+      var s = document.createElement('script');
+      function done() { URL.revokeObjectURL(url); s.remove(); }
+      s.onload = function () {
+        done();
+        var p = window.PLAN;
+        if (p && Array.isArray(p.weeks) && Array.isArray(p.stages) && typeof p.weekStart === 'function') resolve(p);
+        else reject(new Error('plan-data.js in the repository did not define a plan.'));
+      };
+      s.onerror = function () { done(); reject(new Error('plan-data.js in the repository could not be run.')); };
+      s.src = url;
+      document.head.appendChild(s);
+    });
+  }
+
+  // ------------------------------------------------------ connect / boot
+  var auth = readStore(AUTH_KEY);
+  var cache = readStore(CACHE_KEY);
+  if (!auth || typeof auth.repo !== 'string' || typeof auth.token !== 'string') auth = null;
+  if (!auth || !cache || cache.repo !== auth.repo || (cache.branch || '') !== BRANCH || typeof cache.planText !== 'string') cache = null;
+
+  function show(id) {
+    ['loading', 'signin', 'app'].forEach(function (x) { $(x).hidden = x !== id; });
+  }
+  function fetchAll(a) {
+    return getFile(a, 'plan-data.js').then(function (plan) {
+      return getFileOrNull(a, 'progress.json').then(function (prog) {
+        var progress = null;
+        if (prog) {
+          try { progress = JSON.parse(prog.text); }
+          catch (e) { throw new Error('progress.json in the repository is not valid JSON. Fix or delete it on GitHub, then connect again.'); }
+        }
+        return {
+          repo: a.repo, branch: BRANCH, planText: plan.text,
+          progress: progress, sha: prog ? prog.sha : null, dirty: false, savedAt: null
+        };
+      });
+    });
+  }
+  function showSignIn(message) {
+    show('signin');
+    $('si-repo').value = (auth && auth.repo) || DEFAULT_REPO;
+    $('si-link').href = 'https://github.com/settings/personal-access-tokens/new?name=' + encodeURIComponent('AWS learning tracker') +
+      '&description=' + encodeURIComponent('Lets the tracker page read the plan and save progress.json') + '&expires_in=366&contents=write';
+    var err = $('si-error');
+    err.hidden = !message;
+    err.textContent = message || '';
+  }
+  $('signin-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var repo = $('si-repo').value.trim().replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
+    var token = $('si-token').value.trim();
+    var err = $('si-error');
+    if (!/^[\w.\-]+\/[\w.\-]+$/.test(repo)) { err.hidden = false; err.textContent = 'Write the repository as owner/name.'; return; }
+    if (!token) { err.hidden = false; err.textContent = 'Paste the token.'; return; }
+    var candidate = { repo: repo, token: token };
+    var btn = $('si-submit');
+    btn.disabled = true; btn.textContent = 'Connecting...'; err.hidden = true;
+    fetchAll(candidate).then(function (fresh) {
+      return loadPlan(fresh.planText).then(function (plan) {
+        auth = candidate; cache = fresh;
+        if (!writeStore(AUTH_KEY, auth)) throw new Error('This browser is blocking local storage, so it cannot stay connected. Turn off private browsing and try again.');
+        writeStore(CACHE_KEY, cache);
+        $('si-token').value = '';
+        startApp(plan, false);
+      });
+    }).then(null, function (e) {
+      err.hidden = false; err.textContent = explain(e, repo, false);
+    }).then(function () { btn.disabled = false; btn.textContent = 'Connect'; });
+  });
+  function signOut() {
+    writeStore(AUTH_KEY, null);
+    writeStore(CACHE_KEY, null);
+    location.hash = '';
+    location.reload();
+  }
+
+  if (!auth) {
+    showSignIn('');
+  } else if (cache) {
+    // Start at once from this browser's copy, then check GitHub for anything newer.
+    loadPlan(cache.planText).then(function (plan) { startApp(plan, true); }, function (e) { cache = null; showSignIn(e.message); });
+  } else {
+    show('loading');
+    fetchAll(auth).then(function (fresh) {
+      return loadPlan(fresh.planText).then(function (plan) { cache = fresh; writeStore(CACHE_KEY, cache); startApp(plan, false); });
+    }).then(null, function (e) { showSignIn(explain(e, auth.repo, false)); });
+  }
+
+  // =================================================================== app
+  function startApp(PLAN, fromCache) {
+    var TOTAL_WEEKS = PLAN.weeks.length;
+    var storageOk = true;
+
+    // ------------------------------------------------------------ state
+    function emptyState() {
+      return { version: 1, startDate: PLAN.startDate, slips: [], done: {}, hours: {}, notes: {}, mocks: {}, exams: {}, updated: null };
+    }
+    // Accepts anything parsed from JSON; returns a clean state or throws.
+    function normalize(raw) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.version !== 1) {
+        throw new Error('progress.json in the repository is not a tracker progress file (expected "version": 1).');
+      }
+      var s = emptyState();
+      if (isDate(raw.startDate)) s.startDate = raw.startDate;
+      if (Array.isArray(raw.slips)) {
+        raw.slips.forEach(function (x) {
+          var n = x && Number(x.fromWeek);
+          if (Number.isInteger(n) && n >= 1 && n <= TOTAL_WEEKS) s.slips.push({ fromWeek: n, on: isDate(x.on) ? x.on : null });
+        });
+      }
+      if (raw.done && typeof raw.done === 'object') {
+        Object.keys(raw.done).forEach(function (id) {
+          var v = raw.done[id];
+          if (v) s.done[id] = isDate(v) ? v : today();
+        });
+      }
+      if (raw.hours && typeof raw.hours === 'object') {
+        Object.keys(raw.hours).forEach(function (k) {
+          var v = Number(raw.hours[k]);
+          if (isFinite(v) && v > 0) s.hours[k] = v;
+        });
+      }
+      if (raw.notes && typeof raw.notes === 'object') {
+        Object.keys(raw.notes).forEach(function (k) {
+          if (typeof raw.notes[k] === 'string' && raw.notes[k] !== '') s.notes[k] = raw.notes[k];
+        });
+      }
+      if (raw.mocks && typeof raw.mocks === 'object') {
+        Object.keys(raw.mocks).forEach(function (sid) {
+          if (!Array.isArray(raw.mocks[sid])) return;
+          var list = [];
+          raw.mocks[sid].forEach(function (m) {
+            var score = m && Number(m.score);
+            if (!m || !isFinite(score) || score < 0 || score > 100) return;
+            list.push({ date: isDate(m.date) ? m.date : today(), name: String(m.name || 'Practice set'), score: score, timed: m.timed !== false });
+          });
+          if (list.length) s.mocks[sid] = list;
+        });
+      }
+      if (raw.exams && typeof raw.exams === 'object') {
+        Object.keys(raw.exams).forEach(function (sid) {
+          var e = raw.exams[sid];
+          if (!e || typeof e !== 'object') return;
+          var out = {};
+          if (isDate(e.booked)) out.booked = e.booked;
+          if (['passed', 'failed', 'skipped'].indexOf(e.result) !== -1) out.result = e.result;
+          if (isFinite(Number(e.score)) && Number(e.score) > 0) out.score = Number(e.score);
+          if (Object.keys(out).length) s.exams[sid] = out;
+        });
+      }
+      s.updated = typeof raw.updated === 'string' ? raw.updated : null;
+      return s;
+    }
+    function sorted(obj, numeric) {
+      var out = {};
+      Object.keys(obj).sort(function (a, b) { return numeric ? Number(a) - Number(b) : (a < b ? -1 : a > b ? 1 : 0); })
+        .forEach(function (k) { out[k] = obj[k]; });
+      return out;
+    }
+    // Stable key order so the history of progress.json stays readable.
+    function exportState() {
+      return {
+        version: 1,
+        startDate: state.startDate,
+        slips: state.slips,
+        done: sorted(state.done),
+        hours: sorted(state.hours, true),
+        notes: sorted(state.notes, true),
+        mocks: sorted(state.mocks),
+        exams: sorted(state.exams),
+        updated: state.updated
+      };
+    }
+
+    var state;
+    try { state = cache.progress ? normalize(cache.progress) : emptyState(); }
+    catch (e) { cache = null; writeStore(CACHE_KEY, null); showSignIn(e.message); return; }
+
+    function saveCache() {
+      cache.progress = exportState();
+      storageOk = writeStore(CACHE_KEY, cache);
+    }
+
+    // --------------------------------------------------------- schedule
+    function wStart(n) { return PLAN.weekStart(state, n); }
+    function wEnd(n) { return PLAN.weekEnd(state, n); }
+    function weekDone(w) { return w.tasks.every(function (t) { return t.optional || state.done[t.id]; }); }
+    function weekCounts(w) {
+      var need = 0, got = 0;
+      w.tasks.forEach(function (t) {
+        if (t.optional) return;
+        need++;
+        if (state.done[t.id]) got++;
+      });
+      return { need: need, got: got };
+    }
+    function weekStatus(w, now) {
+      if (weekDone(w)) return 'done';
+      if (now >= wStart(w.n) && now <= wEnd(w.n)) return 'current';
+      if (now > wEnd(w.n)) return 'behind';
+      return 'upcoming';
+    }
+    var STATUS_LABEL = { done: 'Done', current: 'This week', behind: 'Behind', upcoming: '' };
+    function calendarWeek(now) {
+      for (var i = 0; i < PLAN.weeks.length; i++) {
+        var w = PLAN.weeks[i];
+        if (now >= wStart(w.n) && now <= wEnd(w.n)) return w;
+      }
+      return null;
+    }
+    function firstOpenWeek() {
+      for (var i = 0; i < PLAN.weeks.length; i++) if (!weekDone(PLAN.weeks[i])) return PLAN.weeks[i];
+      return null;
+    }
+    // The week to work on now: this calendar week, or the first unfinished one.
+    function focusWeek() {
+      var w = calendarWeek(today());
+      if (!w || weekDone(w)) w = firstOpenWeek() || w;
+      return w || PLAN.weeks[0];
+    }
+    function weekByN(n) {
+      for (var i = 0; i < PLAN.weeks.length; i++) if (PLAN.weeks[i].n === n) return PLAN.weeks[i];
+      return null;
+    }
+    function stageOf(id) {
+      for (var i = 0; i < PLAN.stages.length; i++) if (PLAN.stages[i].id === id) return PLAN.stages[i];
+      return null;
+    }
+    function examOf(stage) {
+      for (var i = 0; i < PLAN.exams.length; i++) if (PLAN.exams[i].stage === stage.id) return PLAN.exams[i];
+      return null;
+    }
+    function stageWeeks(stage) { return PLAN.weeks.filter(function (w) { return w.stage === stage.id; }); }
+    function stageCounts(stage) {
+      var need = 0, got = 0;
+      stageWeeks(stage).forEach(function (w) { var c = weekCounts(w); need += c.need; got += c.got; });
+      return { need: need, got: got };
+    }
+    function totals() {
+      var need = 0, got = 0;
+      PLAN.weeks.forEach(function (w) { var c = weekCounts(w); need += c.need; got += c.got; });
+      return { need: need, got: got, pct: need ? Math.round(100 * got / need) : 0 };
+    }
+    function examState(stage) {
+      var res = (state.exams[stage.id] || {}).result;
+      return res === 'passed' || res === 'skipped' ? 'done' : 'upcoming';
+    }
+    // Readiness from the practice-score log of one stage.
+    function readiness(stageId) {
+      var timed = (state.mocks[stageId] || []).filter(function (m) { return m.timed; });
+      var last2 = timed.slice(-2);
+      var mark = PLAN.mockPassMark;
+      if (last2.length === 2 && last2[0].score >= mark && last2[1].score >= mark) {
+        return { ready: true, text: 'Ready: your last two timed sets were ' + num(last2[0].score) + '% and ' + num(last2[1].score) + '%.' };
+      }
+      var tail = timed.length ? ' Last timed set: ' + num(timed[timed.length - 1].score) + '%.' : ' No timed sets logged yet.';
+      return { ready: false, text: 'Not yet: sit the exam after two timed sets in a row at ' + mark + '% or higher.' + tail };
+    }
+    // Every page of the course in order: weeks, with each stage's exam after its last week.
+    function sequence() {
+      var out = [];
+      PLAN.stages.forEach(function (s) {
+        stageWeeks(s).forEach(function (w) { out.push({ hash: '#/week/' + w.n, label: 'Week ' + w.n + ': ' + w.title }); });
+        var e = examOf(s);
+        if (e) out.push({ hash: '#/exam/' + s.id, label: 'Exam: ' + e.code });
+      });
+      return out;
+    }
+
+    // ------------------------------------------------- saving to GitHub
+    var sync = { busy: false, error: '', offline: false, lastCheck: fromCache ? 0 : Date.now(), timer: null, retry: null, planChanged: false };
+    var statusEl = $('sync-status');
+    var bannerEl = $('banner');
+
+    function renderStatus() {
+      var stateName, text;
+      if (sync.error) { stateName = 'error'; text = 'Not saved'; }
+      else if (sync.offline) { stateName = 'offline'; text = cache.dirty ? 'Offline: kept in this browser' : 'Offline'; }
+      else if (cache.dirty || sync.busy) { stateName = 'saving'; text = cache.dirty ? 'Saving...' : 'Checking...'; }
+      else {
+        stateName = 'saved';
+        var at = cache.savedAt ? new Date(cache.savedAt) : null;
+        text = at ? 'Saved ' + pad(at.getHours()) + ':' + pad(at.getMinutes()) : 'Up to date';
+      }
+      statusEl.textContent = text;
+      statusEl.setAttribute('data-state', stateName);
+
+      clear(bannerEl);
+      bannerEl.className = '';
+      if (sync.error) {
+        bannerEl.className = 'bad';
+        append(bannerEl, [h('span', { text: sync.error + ' Your changes are kept in this browser.' }),
+          h('button', { class: 'btn small', type: 'button', text: 'Try again', onclick: function () { sync.error = ''; cache.dirty ? push() : pull(); } }),
+          h('button', { class: 'btn small', type: 'button', text: 'Connect with a new token', onclick: function () {
+            if (cache.dirty && !confirm('Changes that are not saved online will be lost. Continue?')) return;
+            signOut();
+          } })]);
+      } else if (!storageOk) {
+        append(bannerEl, 'This browser is blocking local storage. Keep the page open until the top bar says Saved.');
+      } else if (sync.offline && cache.dirty) {
+        append(bannerEl, 'You are offline. Changes are kept in this browser and saved as soon as GitHub can be reached.');
+      } else if (sync.planChanged) {
+        append(bannerEl, [h('span', { text: 'The plan in the repository has changed.' }),
+          h('button', { class: 'btn small', type: 'button', text: 'Reload to see it', onclick: function () { location.reload(); } })]);
+      }
+      bannerEl.hidden = !bannerEl.firstChild;
+    }
+    function fail(err, writing) {
+      if (err instanceof ApiError && err.status === 0) {
+        sync.offline = true;
+        clearTimeout(sync.retry);
+        sync.retry = setTimeout(function () { if (sync.offline) { cache.dirty ? push() : pull(); } }, 30000);
+      } else {
+        sync.error = explain(err, auth.repo, writing);
+      }
+    }
+    function commitMessage() {
+      var t = totals();
+      return 'Progress: ' + t.got + ' of ' + t.need + ' tasks';
+    }
+    // Writes progress.json. A newer online copy (another device) sends us to pull().
+    function push(keepalive) {
+      clearTimeout(sync.timer);
+      if (!cache.dirty || sync.busy) return Promise.resolve();
+      sync.busy = true;
+      renderStatus();
+      var stamp = state.updated;
+      var text = JSON.stringify(exportState(), null, 2) + '\n';
+      var conflict = false;
+      return putFile(auth, 'progress.json', text, cache.sha, commitMessage(), keepalive).then(function (sha) {
+        cache.sha = sha;
+        cache.savedAt = new Date().toISOString();
+        if (state.updated === stamp) cache.dirty = false;
+        sync.error = ''; sync.offline = false; sync.lastCheck = Date.now();
+        saveCache();
+      }, function (err) {
+        // 409: the file changed online since we last read it. 422: it exists but we thought it did not.
+        if (err instanceof ApiError && (err.status === 409 || err.status === 422)) conflict = true;
+        else fail(err, true);
+      }).then(function () {
+        sync.busy = false;
+        renderStatus();
+        if (conflict) return pull();
+        if (cache.dirty && !sync.error && !sync.offline) schedulePush(1200);
+      });
+    }
+    function schedulePush(ms) {
+      clearTimeout(sync.timer);
+      sync.timer = setTimeout(function () { push(); }, ms);
+    }
+    // Reads progress.json and takes it when it is newer than what this browser has.
+    function pull() {
+      if (sync.busy) return Promise.resolve();
+      sync.busy = true;
+      renderStatus();
+      var adopted = false;
+      return getFileOrNull(auth, 'progress.json').then(function (remote) {
+        sync.error = ''; sync.offline = false; sync.lastCheck = Date.now();
+        var remoteSha = remote ? remote.sha : null;
+        if (remoteSha === cache.sha) return;
+        var next;
+        try { next = remote ? normalize(JSON.parse(remote.text)) : emptyState(); }
+        catch (e) { throw new Error(e instanceof SyntaxError ? 'progress.json in the repository is not valid JSON.' : e.message); }
+        if (cache.dirty && !confirm(
+          'Your progress was also changed from another browser or device after this one last saved.\n\n' +
+          'OK: use the online copy. Unsaved changes in this browser are dropped.\n' +
+          'Cancel: keep this browser\'s copy and overwrite the online one.')) {
+          cache.sha = remoteSha;      // next save replaces the online copy
+          saveCache();
+          return;
+        }
+        state = next;
+        cache.sha = remoteSha;
+        cache.dirty = false;
+        cache.savedAt = null;
+        saveCache();
+        adopted = true;
+      }).then(null, function (err) { fail(err, false); }).then(function () {
+        sync.busy = false;
+        if (adopted) renderEverything(); else renderStatus();
+        if (cache.dirty && !sync.error && !sync.offline) schedulePush(300);
+      });
+    }
+    function checkPlan() {
+      getFile(auth, 'plan-data.js').then(function (plan) {
+        if (plan.text === cache.planText) return;
+        cache.planText = plan.text;
+        saveCache();
+        sync.planChanged = true;
+        renderStatus();
+      }, function () { /* the progress check reports connection and token problems */ });
+    }
+    // Call after every change the user makes. kind 'text' skips rebuilding the contents list.
+    function commit(kind) {
+      state.updated = new Date().toISOString();
+      cache.dirty = true;
+      saveCache();
+      refreshDerived(kind);
+      schedulePush(2500);
+    }
+    function onLeave() { if (cache.dirty) push(true); }
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') { onLeave(); return; }
+      if (Date.now() - sync.lastCheck > 20000) { cache.dirty ? push() : pull(); }
+    });
+    window.addEventListener('pagehide', onLeave);
+    window.addEventListener('online', function () { sync.offline = false; cache.dirty ? push() : pull(); });
+
+    // ----------------------------------------------------------- routes
+    function route() {
+      var path = location.hash.replace(/^#\/?/, ''), m;
+      if ((m = /^week\/(\d+)$/.exec(path)) && weekByN(Number(m[1]))) return { view: 'week', week: weekByN(Number(m[1])) };
+      if ((m = /^exam\/([\w-]+)$/.exec(path)) && stageOf(m[1]) && examOf(stageOf(m[1]))) return { view: 'exam', stage: stageOf(m[1]) };
+      if ((m = /^ref\/(courses|sfmap|audit|rules)$/.exec(path))) return { view: m[1] };
+      return { view: 'home' };
+    }
+    var navEl = $('nav');
+    var mainEl = $('main');
+    var navToggle = $('nav-toggle');
+    var openStages = {};
+    var viewRefresh = null;      // updates the derived parts of the current page after a tick
+
+    function setNavOpen(open) {
+      navEl.classList.toggle('open', open);
+      navToggle.setAttribute('aria-expanded', String(open));
+    }
+    navToggle.addEventListener('click', function () { setNavOpen(!navEl.classList.contains('open')); });
+
+    // ---------------------------------------------------- contents list
+    function navItem(hash, active, dotClass, statusText, title, sub, count) {
+      return h('a', { class: 'nav-item' + (active ? ' active' : ''), href: hash, 'aria-current': active ? 'page' : null },
+        h('span', { class: 'dot ' + dotClass }),
+        h('span', { class: 't' }, h('b', { text: title }), sub ? h('span', { text: sub }) : null,
+          statusText ? h('span', { class: 'vh', text: statusText }) : null),
+        count ? h('span', { class: 'n', text: count }) : null);
+    }
+    function renderNav() {
+      var r = route();
+      var now = today();
+      var scroll = navEl.scrollTop;
+      clear(navEl);
+      navEl.appendChild(h('a', { class: 'nav-item plain' + (r.view === 'home' ? ' active' : ''), href: '#/', text: 'Overview' }));
+
+      PLAN.stages.forEach(function (stage) {
+        var c = stageCounts(stage);
+        var exam = examOf(stage);
+        var holdsCurrent = (r.view === 'week' && r.week.stage === stage.id) || (r.view === 'exam' && r.stage.id === stage.id);
+        if (holdsCurrent) openStages[stage.id] = true;
+        var group = h('details', { class: 'nav-group', open: !!openStages[stage.id] },
+          h('summary', null, h('span', { class: 'g', text: stage.name }), h('span', { class: 'n', text: c.got + '/' + c.need })));
+        group.addEventListener('toggle', function () { openStages[stage.id] = group.open; });
+        stageWeeks(stage).forEach(function (w) {
+          var st = weekStatus(w, now);
+          var wc = weekCounts(w);
+          group.appendChild(navItem('#/week/' + w.n, r.view === 'week' && r.week.n === w.n,
+            st === 'upcoming' ? '' : st, STATUS_LABEL[st], 'Week ' + w.n, w.title, wc.got + '/' + wc.need));
+        });
+        if (exam) {
+          var es = examState(stage);
+          group.appendChild(navItem('#/exam/' + stage.id, r.view === 'exam' && r.stage.id === stage.id,
+            es === 'done' ? 'done' : '', es === 'done' ? 'Done' : '', 'Exam: ' + exam.code, stage.examOptional ? 'Optional' : 'Practice scores and result', ''));
+        }
+        navEl.appendChild(group);
+      });
+
+      navEl.appendChild(h('div', { class: 'nav-head', text: 'Reference' }));
+      [['courses', 'Courses and costs'], ['sfmap', 'Salesforce to AWS'], ['audit', 'Audit checklist'], ['rules', 'Rules and settings']].forEach(function (x) {
+        navEl.appendChild(h('a', { class: 'nav-item plain' + (r.view === x[0] ? ' active' : ''), href: '#/ref/' + x[0], text: x[1] }));
+      });
+      navEl.scrollTop = scroll;
+    }
+    function renderTop() {
+      var t = totals();
+      $('top-progress-text').textContent = t.pct + '% complete, ' + t.got + ' of ' + t.need + ' tasks';
+      $('top-progress-bar').style.width = t.pct + '%';
+    }
+
+    // ------------------------------------------------------------- pages
+    function tile(label, big, sub) {
+      return h('div', { class: 'tile' },
+        h('div', { class: 'label', text: label }),
+        h('div', { class: 'big', text: big }),
+        h('div', { class: 'sub', text: sub }));
+    }
+    function slipButtons() {
+      var slipBtn = h('button', {
+        class: 'btn', type: 'button', id: 'btn-slip', text: 'Slip a week',
+        onclick: function () {
+          var w = firstOpenWeek();
+          if (!w) { alert('Every week is ticked. Nothing to slip.'); return; }
+          var newFinish = PLAN.addDays(wEnd(TOTAL_WEEKS), 7);
+          if (!confirm('Push week ' + w.n + ' (' + w.title + ') and every week after it by 7 days?\n\nNew planned finish: ' + fmtDate(newFinish, true) + '.')) return;
+          state.slips.push({ fromWeek: w.n, on: today() });
+          commit();
+          renderEverything();
+        }
+      });
+      var undoBtn = state.slips.length ? h('button', {
+        class: 'btn', type: 'button', id: 'btn-unslip', text: 'Undo slip',
+        onclick: function () {
+          var last = state.slips[state.slips.length - 1];
+          if (!confirm('Undo the last slip (from week ' + last.fromWeek + ')? Week ' + last.fromWeek + ' and later move back by 7 days.')) return;
+          state.slips.pop();
+          commit();
+          renderEverything();
+        }
+      }) : null;
+      return h('div', { class: 'actions' }, slipBtn, undoBtn);
+    }
+
+    function renderHome() {
+      var now = today();
+      var t = totals();
+      var behind = PLAN.weeks.filter(function (w) { return weekStatus(w, now) === 'behind'; }).map(function (w) { return w.n; });
+      var slipText = state.slips.length ? ' (slipped ' + state.slips.length + (state.slips.length === 1 ? ' week' : ' weeks') + ')' : '';
+
+      append(mainEl, h('h1', { text: PLAN.title || 'AWS learning plan' }));
+      append(mainEl, h('p', { class: 'lead', id: 'finish-line' },
+        TOTAL_WEEKS + ' weeks at ' + PLAN.hoursPerWeek + ' hours a week. Planned finish: ' + fmtDate(wEnd(TOTAL_WEEKS), true) + slipText + '.',
+        behind.length ? [' ', h('span', { class: 'behind', text: 'Behind on week' + (behind.length > 1 ? 's ' : ' ') + behind.join(', ') + '. Finish them or slip a week.' })] : null));
+
+      var open = firstOpenWeek();
+      var fw = focusWeek();
+      if (open) {
+        var fc = weekCounts(fw);
+        var started = t.got > 0;
+        append(mainEl, h('div', { class: 'card resume' },
+          h('div', { class: 'what' },
+            h('div', { class: 'label', text: started ? 'Continue' : 'Start here' }),
+            h('div', { class: 'big', text: 'Week ' + fw.n + ': ' + fw.title }),
+            h('div', { class: 'sub', text: fmtRange(wStart(fw.n), wEnd(fw.n)) + ', ' + fc.got + ' of ' + fc.need + ' done' })),
+          h('a', { class: 'btn primary', id: 'resume', href: '#/week/' + fw.n, text: started ? 'Resume' : 'Start' })));
+      } else {
+        append(mainEl, h('div', { class: 'complete', text: 'Every week is ticked. Plan complete.' }));
+      }
+
+      var cal = calendarWeek(now);
+      var t1;
+      if (now < wStart(1)) {
+        var d = daysBetween(now, wStart(1));
+        t1 = tile('This week', 'Starts in ' + d + (d === 1 ? ' day' : ' days'), 'Week 1 begins ' + fmtDate(wStart(1), true));
+      } else if (cal) {
+        t1 = tile('This week', 'Week ' + cal.n + ' of ' + TOTAL_WEEKS, fmtRange(wStart(cal.n), wEnd(cal.n)));
+      } else if (now > wEnd(TOTAL_WEEKS)) {
+        t1 = tile('This week', open ? 'Past the planned finish' : 'Plan complete', open ? 'Week ' + open.n + ' is the first unfinished week' : 'All ' + TOTAL_WEEKS + ' weeks ticked');
+      } else {
+        // Inside a gap created by a slip.
+        var nextW = PLAN.weeks.filter(function (w) { return wStart(w.n) > now; })[0];
+        t1 = tile('This week', 'Catch-up week', nextW ? 'Week ' + nextW.n + ' begins ' + fmtDate(wStart(nextW.n), true) : '');
+      }
+      var t2 = tile('Progress', t.pct + '%', t.got + ' of ' + t.need + ' tasks');
+      var logged = 0, plannedToDate = 0, plannedAll = 0;
+      PLAN.weeks.forEach(function (w) {
+        plannedAll += w.hours;
+        if (now >= wStart(w.n)) plannedToDate += w.hours;
+        logged += state.hours[w.n] || 0;
+      });
+      var t3 = tile('Hours', num(logged) + ' logged', num(plannedToDate) + ' planned to date, ' + plannedAll + ' in total');
+      var nextStage = null;
+      PLAN.stages.forEach(function (s) { if (!nextStage && examOf(s) && examState(s) !== 'done') nextStage = s; });
+      var t4;
+      if (nextStage) {
+        var rec = state.exams[nextStage.id] || {};
+        var whenText = rec.booked ? 'Booked for ' + fmtDate(rec.booked, true) : 'Planned for the week of ' + fmtDate(wStart(nextStage.weeks[1]), true);
+        var rd = readiness(nextStage.id);
+        t4 = tile('Next exam', examOf(nextStage).code + (nextStage.examOptional ? ' (optional)' : ''), whenText + '. ' + (rd.ready ? 'Practice scores say ready.' : 'Practice scores not there yet.'));
+      } else {
+        t4 = tile('Next exam', 'None left', 'Every exam is passed or skipped');
+      }
+      append(mainEl, h('div', { class: 'tiles', id: 'tiles' }, t1, t2, t3, t4));
+
+      PLAN.stages.forEach(function (stage) {
+        var c = stageCounts(stage);
+        var weeks = stageWeeks(stage);
+        var target = weeks.filter(function (w) { return !weekDone(w); })[0] || weeks[0];
+        var exam = examOf(stage);
+        append(mainEl, h('div', { class: 'card stage-card', id: 'stage-' + stage.id },
+          h('h2', null, h('a', { href: '#/week/' + target.n, text: stage.name })),
+          h('p', { class: 'muted', text: stage.goal }),
+          h('div', { class: 'row' },
+            h('span', { text: 'Weeks ' + stage.weeks[0] + ' to ' + stage.weeks[1] + ', ' + fmtRange(wStart(stage.weeks[0]), wEnd(stage.weeks[1])) }),
+            exam ? h('span', { text: 'Exam: ' + exam.code + (stage.examOptional ? ' (optional)' : '') }) : null,
+            h('span', { class: 'n', text: c.got + ' of ' + c.need + ' tasks' })),
+          h('span', { class: 'bar' }, h('i', { style: 'width:' + (c.need ? Math.round(100 * c.got / c.need) : 0) + '%' }))));
+      });
+
+      append(mainEl, h('div', { class: 'card' },
+        h('h2', { text: 'Lost a week?' }),
+        h('p', { class: 'muted', text: 'Slip a week pushes the first unfinished week and every week after it by 7 days. Slip rather than doubling up.' }),
+        slipButtons()));
+    }
+
+    function pager(hash) {
+      var seq = sequence(), i = -1;
+      seq.forEach(function (x, k) { if (x.hash === hash) i = k; });
+      var prev = i > 0 ? seq[i - 1] : null, next = i >= 0 && i < seq.length - 1 ? seq[i + 1] : null;
+      return h('div', { class: 'pager' },
+        prev ? h('a', { class: 'btn prev', href: prev.hash, text: 'Previous: ' + prev.label }) : null,
+        next ? h('a', { class: 'btn next', href: next.hash, text: 'Next: ' + next.label }) : null);
+    }
+    function nextOf(hash) {
+      var seq = sequence();
+      for (var i = 0; i < seq.length - 1; i++) if (seq[i].hash === hash) return seq[i + 1];
+      return null;
+    }
+
+    function renderTask(t) {
+      var li = h('li', { class: state.done[t.id] ? 'is-done' : null });
+      var cb = h('input', {
+        type: 'checkbox', id: 't-' + t.id, checked: !!state.done[t.id],
+        onchange: function () {
+          if (cb.checked) state.done[t.id] = today(); else delete state.done[t.id];
+          li.className = cb.checked ? 'is-done' : '';
+          commit();
+        }
+      });
+      var label = h('label', { for: 't-' + t.id }, rich(t.text), t.optional ? h('span', { class: 'opt', text: 'optional' }) : null);
+      append(li, [cb, label, t.url ? h('a', { class: 'tlink', href: t.url, target: '_blank', rel: 'noopener', text: 'Open' }) : null]);
+      return li;
+    }
+
+    function renderWeek(w) {
+      var stage = stageOf(w.stage);
+      var hash = '#/week/' + w.n;
+      var chip = h('span', { class: 'chip' });
+      var count = h('span', { id: 'week-count' });
+      var completeBox = h('div', { class: 'complete', id: 'week-complete', hidden: true });
+      var next = nextOf(hash);
+
+      viewRefresh = function () {
+        var st = weekStatus(w, today());
+        var c = weekCounts(w);
+        chip.className = 'chip ' + (st === 'upcoming' ? '' : st);
+        chip.textContent = STATUS_LABEL[st];
+        count.textContent = c.got + ' of ' + c.need + ' done';
+        completeBox.hidden = st !== 'done';
+      };
+
+      var hoursInput = h('input', {
+        type: 'number', min: '0', max: '60', step: '0.5', id: 'h-' + w.n,
+        value: state.hours[w.n] !== undefined ? String(state.hours[w.n]) : '',
+        oninput: function () {
+          var v = Number(hoursInput.value);
+          if (hoursInput.value !== '' && isFinite(v) && v > 0) state.hours[w.n] = v; else delete state.hours[w.n];
+          commit('text');
+        }
+      });
+      var notes = h('textarea', {
+        id: 'n-' + w.n, placeholder: 'What you learned, what was hard, what to ask about.',
+        oninput: function () {
+          if (notes.value !== '') state.notes[w.n] = notes.value; else delete state.notes[w.n];
+          commit('text');
+        }
+      });
+      notes.value = state.notes[w.n] || '';
+
+      append(completeBox, [h('span', { text: 'Week ' + w.n + ' complete.' }),
+        next ? h('a', { class: 'btn primary', href: next.hash, text: 'Go to ' + next.label }) : null]);
+
+      append(mainEl, [
+        h('p', { class: 'crumb' }, h('a', { href: '#/', text: 'Overview' }), ' / ' + stage.name + ' / Week ' + w.n + ' of ' + TOTAL_WEEKS),
+        h('h1', { text: w.title }),
+        h('p', { class: 'meta' },
+          h('span', { text: fmtRange(wStart(w.n), wEnd(w.n)) }),
+          h('span', { text: w.hours + ' hours planned' }),
+          count, chip),
+        w.note ? h('p', { class: 'week-note', text: w.note }) : null,
+        h('ul', { class: 'items' }, w.tasks.map(renderTask)),
+        completeBox,
+        h('details', { class: 'material' },
+          h('summary', { text: 'Course and practice material for this stage' }),
+          h('ul', null, stage.material.map(function (m) { return h('li', null, link(m.label, m.url)); }))),
+        h('div', { class: 'card log' },
+          h('div', null,
+            h('label', { for: 'h-' + w.n, text: 'Hours this week' }),
+            hoursInput),
+          h('div', null,
+            h('label', { for: 'n-' + w.n, text: 'Notes' }),
+            notes)),
+        pager(hash)
+      ]);
+      viewRefresh();
+    }
+
+    function renderExam(stage) {
+      var exam = examOf(stage);
+      var hash = '#/exam/' + stage.id;
+      var box = h('div', { id: 'gate-' + stage.id });
+      append(mainEl, [
+        h('p', { class: 'crumb' }, h('a', { href: '#/', text: 'Overview' }), ' / ' + stage.name + ' / Exam'),
+        h('h1', null, exam.code + ' ' + exam.name, stage.examOptional ? h('span', { class: 'opt', text: 'optional' }) : null),
+        h('p', { class: 'meta' },
+          h('span', { text: exam.questions + ' questions, ' + exam.minutes + ' minutes' }),
+          h('span', { text: 'Pass mark ' + exam.pass }),
+          h('span', { text: 'USD ' + exam.usd + ' (A$' + exam.aud + ')' })),
+        h('p', { class: 'muted' }, exam.note + ' ', link('Exam page', exam.url), ', ', link('exam guide', exam.guide), '.'),
+        box,
+        pager(hash)
+      ]);
+      fillGate(box, stage);
+    }
+    function fillGate(box, stage) {
+      clear(box);
+      var rec = state.exams[stage.id] || {};
+      var mocks = state.mocks[stage.id] || [];
+      var r = readiness(stage.id);
+      var refill = function () { fillGate(box, stage); };
+
+      if (rec.result === 'passed') append(box, h('p', { class: 'ready yes', text: 'Passed' + (rec.score ? ' with ' + rec.score : '') + '.' }));
+      else if (rec.result === 'skipped') append(box, h('p', { class: 'ready yes', text: 'Skipped by choice. The learning in this stage still counts.' }));
+      else append(box, h('p', { class: 'ready' + (r.ready ? ' yes' : ''), text: r.text }));
+
+      var pre = 'g-' + stage.id + '-';
+      var card = h('div', { class: 'card' }, h('h2', { text: 'Practice scores' }));
+      if (mocks.length) {
+        var tbody = h('tbody');
+        mocks.forEach(function (m, i) {
+          tbody.appendChild(h('tr', null,
+            h('td', { text: fmtDate(m.date, true) }),
+            h('td', { text: m.name }),
+            h('td', { class: 'num', text: num(m.score) + '%' }),
+            h('td', { text: m.timed ? 'Timed' : 'Untimed' }),
+            h('td', { class: 'num' }, h('button', {
+              class: 'btn small', type: 'button', text: 'Remove', 'aria-label': 'Remove ' + m.name,
+              onclick: function () {
+                mocks.splice(i, 1);
+                if (!mocks.length) delete state.mocks[stage.id];
+                commit();
+                refill();
+              }
+            }))));
+        });
+        append(card, h('div', { class: 'table-scroll' }, h('table', null,
+          h('thead', null, h('tr', null, h('th', { text: 'Date' }), h('th', { text: 'Practice set' }), h('th', { text: 'Score' }), h('th', { text: 'Mode' }), h('th'))),
+          tbody)));
+      } else {
+        append(card, h('p', { class: 'muted', text: 'Nothing logged yet. Log each practice set as you finish it.' }));
+      }
+      var dateIn = h('input', { type: 'date', id: pre + 'date', value: today() });
+      var nameIn = h('input', { type: 'text', id: pre + 'name', placeholder: 'Tutorials Dojo set 1' });
+      var scoreIn = h('input', { type: 'number', id: pre + 'score', min: '0', max: '100', step: '0.1' });
+      var timedIn = h('input', { type: 'checkbox', id: pre + 'timed', checked: true });
+      append(card, h('form', {
+        class: 'row-form',
+        onsubmit: function (ev) {
+          ev.preventDefault();
+          var score = Number(scoreIn.value);
+          if (scoreIn.value === '' || !isFinite(score) || score < 0 || score > 100) { scoreIn.focus(); return; }
+          if (!state.mocks[stage.id]) state.mocks[stage.id] = [];
+          state.mocks[stage.id].push({
+            date: isDate(dateIn.value) ? dateIn.value : today(),
+            name: nameIn.value.trim() || 'Practice set ' + (state.mocks[stage.id].length + 1),
+            score: score,
+            timed: timedIn.checked
+          });
+          commit();
+          refill();
+        }
+      },
+        h('div', null, h('label', { for: pre + 'date', text: 'Date' }), dateIn),
+        h('div', null, h('label', { for: pre + 'name', text: 'Practice set' }), nameIn),
+        h('div', null, h('label', { for: pre + 'score', text: 'Score %' }), scoreIn),
+        h('div', null, h('label', { for: pre + 'timed' }, timedIn, ' Timed')),
+        h('button', { class: 'btn', type: 'submit', text: 'Log score' })));
+      append(box, card);
+
+      function setExam(field, value) {
+        var e = state.exams[stage.id] || {};
+        if (value === '' || value === null) delete e[field]; else e[field] = value;
+        if (Object.keys(e).length) state.exams[stage.id] = e; else delete state.exams[stage.id];
+        commit();
+      }
+      var bookedIn = h('input', {
+        type: 'date', id: pre + 'booked', value: rec.booked || '',
+        onchange: function () { setExam('booked', isDate(bookedIn.value) ? bookedIn.value : ''); }
+      });
+      var resultIn = h('select', {
+        id: pre + 'result',
+        onchange: function () { setExam('result', resultIn.value); refill(); }
+      },
+        h('option', { value: '', text: 'Not sat yet' }),
+        h('option', { value: 'passed', text: 'Passed' }),
+        h('option', { value: 'failed', text: 'Failed' }),
+        stage.examOptional ? h('option', { value: 'skipped', text: 'Skipped' }) : null);
+      resultIn.value = rec.result || '';
+      var examScoreIn = h('input', {
+        type: 'number', id: pre + 'examscore', min: '100', max: '1000', step: '1', value: rec.score ? String(rec.score) : '',
+        onchange: function () {
+          var v = Number(examScoreIn.value);
+          setExam('score', examScoreIn.value !== '' && isFinite(v) && v > 0 ? v : '');
+        }
+      });
+      append(box, h('div', { class: 'card' },
+        h('h2', { text: 'The exam' }),
+        h('div', { class: 'row-form', style: 'margin-top:0' },
+          h('div', null, h('label', { for: pre + 'booked', text: 'Booked for' }), bookedIn),
+          h('div', null, h('label', { for: pre + 'result', text: 'Result' }), resultIn),
+          h('div', null, h('label', { for: pre + 'examscore', text: 'Score' }), examScoreIn))));
+    }
+
+    // -------------------------------------------------- reference pages
+    function tableOf(headers, rows) {
+      return h('div', { class: 'table-scroll' }, h('table', null,
+        h('thead', null, h('tr', null, headers.map(function (x) { return h('th', { text: x }); }))),
+        h('tbody', null, rows.map(function (cells) {
+          return h('tr', null, cells.map(function (c) { return h('td', null, c); }));
+        }))));
+    }
+    function renderCourses() {
+      append(mainEl, h('h1', { text: 'Courses and costs' }));
+      append(mainEl, h('div', { class: 'card' },
+        h('h2', { text: 'Exams' }),
+        tableOf(['Exam', 'Format', 'Pass mark', 'Fee', 'Notes'], PLAN.exams.map(function (e) {
+          return [
+            [link(e.code, e.url), h('span', { class: 'why', text: e.name })],
+            e.questions + ' questions, ' + e.minutes + ' min',
+            String(e.pass),
+            'USD ' + e.usd + ' (A$' + e.aud + ')',
+            [e.note + ' ', link('Exam guide', e.guide)]
+          ];
+        })),
+        h('p', { class: 'small muted' }, 'Book through your AWS Certification account. ', link('Schedule an exam', PLAN.links.schedule), '. ', link('Read the testing policies before you book', PLAN.links.beforeTesting), '.')));
+      append(mainEl, h('div', { class: 'card' },
+        h('h2', { text: 'Courses and practice exams' }),
+        tableOf(['Stage', 'Use', 'Course', 'Length', 'Price'], PLAN.courses.map(function (c) {
+          return [
+            stageOf(c.stage).name.split(':')[0],
+            c.role,
+            [link(c.title, c.url), h('span', { class: 'why', text: c.by + (c.where !== c.by ? ', ' + c.where : '') + (c.note ? '. ' + c.note : '') })],
+            c.length,
+            c.price
+          ];
+        }))));
+      append(mainEl, h('div', { class: 'card' },
+        h('h2', { text: 'Cost' }),
+        tableOf(['Item', 'Amount', 'Detail'], PLAN.costs.map(function (c) { return [c.item, c.amount, c.detail]; })),
+        h('p', { class: 'small muted', text: 'Prices, lengths and exam versions were checked on ' + fmtDate(PLAN.checked, true) + '. Check the linked pages again before you buy or book.' })));
+    }
+    function renderSfMap() {
+      append(mainEl, h('h1', { text: 'Salesforce to AWS' }));
+      append(mainEl, h('div', { class: 'card' },
+        h('h2', { text: 'What you already know, in AWS terms' }),
+        tableOf(['Salesforce', 'AWS', 'Difference to remember'], PLAN.sfMap.map(function (r) { return [r.sf, r.aws, r.note]; }))));
+      append(mainEl, h('div', { class: 'card' },
+        h('h2', { text: 'No Salesforce equivalent: spend most of your time here' }),
+        h('ul', null, PLAN.sfGaps.map(function (g) { return h('li', { text: g }); }))));
+    }
+    function renderAudit() {
+      append(mainEl, h('h1', { text: 'Audit checklist for AI-built systems' }));
+      append(mainEl, h('div', { class: 'card' },
+        h('p', { text: PLAN.audit.intro }),
+        h('ol', null, PLAN.audit.questions.map(function (x) {
+          return h('li', null, x.q, h('span', { class: 'why', text: x.why }));
+        }))));
+      append(mainEl, h('div', { class: 'card' },
+        h('h2', { text: 'Afterwards' }),
+        h('ul', null, PLAN.audit.after.map(function (x) { return h('li', { text: x }); }))));
+    }
+    function renderRules() {
+      append(mainEl, h('h1', { text: 'Rules and settings' }));
+      append(mainEl, h('div', { class: 'card' },
+        h('h2', { text: 'Rules' }),
+        h('ul', null, PLAN.rules.map(function (x) { return h('li', { text: x }); }))));
+      append(mainEl, h('div', { class: 'card' },
+        h('h2', { text: 'How saving works' }),
+        h('ul', null,
+          h('li', { text: 'Every tick, hour, note and score is saved a few seconds later to progress.json in ' + auth.repo + '. The top bar says Saved when it is there.' }),
+          h('li', { text: 'Open this page on any computer or phone and connect it once; it shows the same progress.' }),
+          h('li', { text: 'Offline, changes are kept in this browser and saved when GitHub can be reached again.' }),
+          h('li', { text: 'The plan itself is plan-data.js in the same repository. Edit it there; never change the id of a task you have ticked.' }))));
+      var startIn = h('input', {
+        type: 'date', id: 'start-date', value: state.startDate,
+        onchange: function () {
+          if (!isDate(startIn.value)) { startIn.value = state.startDate; return; }
+          state.startDate = startIn.value;
+          commit();
+          renderEverything();
+        }
+      });
+      append(mainEl, h('div', { class: 'card' },
+        h('h2', { text: 'Schedule' }),
+        h('div', { class: 'field' }, h('label', { for: 'start-date', text: 'Start date of week 1' }), startIn),
+        h('p', { class: 'small muted', text: 'Every week runs for 7 days from this date. Slip a week pushes the first unfinished week and everything after it by 7 days.' }),
+        slipButtons()));
+      append(mainEl, h('div', { class: 'card' },
+        h('h2', { text: 'This browser' }),
+        h('p', { class: 'muted', text: 'Connected to ' + auth.repo + (BRANCH ? ' (branch ' + BRANCH + ')' : '') + '. Signing out removes the token and the cached copy from this browser; nothing on GitHub changes.' }),
+        h('button', {
+          class: 'btn', type: 'button', id: 'btn-signout', text: 'Sign out',
+          onclick: function () {
+            if (cache.dirty && !confirm('Some changes are not saved online yet and will be lost. Sign out anyway?')) return;
+            signOut();
+          }
+        })));
+      if (PLAN.background && PLAN.background.length) {
+        append(mainEl, h('div', { class: 'card' },
+          h('h2', { text: 'Where this plan comes from' }),
+          h('ul', null, PLAN.background.map(function (x) { return h('li', { text: x }); }))));
+      }
+    }
+
+    function renderView() {
+      var r = route();
+      viewRefresh = null;
+      clear(mainEl);
+      if (r.view === 'week') renderWeek(r.week);
+      else if (r.view === 'exam') renderExam(r.stage);
+      else if (r.view === 'courses') renderCourses();
+      else if (r.view === 'sfmap') renderSfMap();
+      else if (r.view === 'audit') renderAudit();
+      else if (r.view === 'rules') renderRules();
+      else renderHome();
+      var title = mainEl.querySelector('h1');
+      document.title = (title ? title.textContent + ' - ' : '') + 'AWS learning tracker';
+    }
+    function renderEverything() {
+      renderTop();
+      renderNav();
+      renderView();
+      renderStatus();
+    }
+    function refreshDerived(kind) {
+      renderTop();
+      if (kind !== 'text') {
+        renderNav();
+        if (viewRefresh) viewRefresh();
+      }
+      renderStatus();
+    }
+    window.addEventListener('hashchange', function () {
+      renderNav();
+      renderView();
+      setNavOpen(false);
+      window.scrollTo(0, 0);
+    });
+
+    // ------------------------------------------------------------- start
+    openStages[focusWeek().stage] = true;
+    show('app');
+    renderEverything();
+    if (fromCache) {
+      (cache.dirty ? push() : pull()).then(checkPlan);
+    }
+  }
+})();
+</script>
+</body>
+</html>
